@@ -1,0 +1,56 @@
+env:
+    CIRRUS_CLONE_DEPTH: 1
+    BUILD_HOSTNAME: "CirrusCI"
+    CIRRUS_WORKING_DIR: "/tmp/ci"
+    ALLOW_MISSING_DEPENDENCIES: "true"
+
+    ZIPNAME: "twrp-12.1-3Gb-cache-boot.zip"
+    ZIPNAME1: "twrp-12.1-3Gb-cache-recovery.zip"
+
+    RCLONE: "ENCRYPTED[dfec0bd9dbddd4998c53baac051a3b8a76aaf1f21ae214005be04253e206be0e06fbd013f800e55e2ddf27014153ee1b]"
+    TOKEN: "ENCRYPTED[048c71c3a3957980168b647fa5169ff09d89763da5cca1710f25a247871e029732238ecd71bffe9c936561187e3e2b33]"
+
+    BOTTOKEN: "ENCRYPTED[d7c23a809a8fba9eb61bd603713f0e94e79ea0ea52208c78cfe42bb43e23c659309599a847aeb3b5e7a747eeff18bf7c]"
+    CHATID: "ENCRYPTED[3e1b9158a9ad59782e774b8ef91bd68ce6407ed97961ed5920e2bdb6c41d9a9431f29784055009313af83ac888ef79da]"
+
+task:
+  name: TWRP - Xiaomi Redmi Note 10 Pro
+  container:
+    image: dopaemon/bionic
+    cpu: 6
+    memory: 18G
+
+  setup_script:
+    - sudo apt update
+    - sudo apt install -yq $RCLONE
+    - mkdir -p /home/doraemon/.config/$RCLONE
+    - touch /home/doraemon/.config/$RCLONE/$RCLONE.conf
+    - echo "$TOKEN" > /home/doraemon/.config/$RCLONE/$RCLONE.conf
+
+  sync_script:
+    - mkdir -p ~/twrp
+    - cd ~/twrp
+    - repo init --depth=1 --no-repo-verify -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-12.1 -g default,-mips,-darwin,-notdefault
+    - repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune --force-sync -j$(nproc --all) || repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune --force-sync -j$(nproc --all)
+    - git clone -b sweet-12.1 --single-branch --depth="1" https://github.com/dopaemon/TWRP.git device/xiaomi/sweet
+    - cd system/vold
+    - git fetch https://github.com/SuperiorOS-Violet/twrp_system_vold.git twrp-12.1
+    - git cherry-pick ec85669abf98caccdba6243d506a274ea064f282
+    - cd ~/twrp
+    - cd bootable/recovery
+    - git fetch https://github.com/SuperiorOS-Violet/twrp_bootable_recovery.git twrp-12.1
+    - git cherry-pick 145c2b7ed972b43f5e6f54266c1ee158bc823730
+  build_script:
+    - cd ~/twrp
+    - export ALLOW_MISSING_DEPENDENCIES=true
+    - source build/envsetup.sh
+    - lunch twrp_sweet-eng
+    - mka recoveryimage -j$(nproc --all) | tee recoveryimage.log
+    - mka bootimage -j$(nproc --all) | tee bootimage.log
+    - mka vendorbootimage -j$(nproc --all) | tee vendorbootimage.log
+  upload_script:
+    - cd ~/twrp
+    - zip -rv9 $ZIPNAME out/target/product/sweet/boot.img
+    - zip -rv9 $ZIPNAME1 out/target/product/sweet/recovery.img
+    - curl -F chat_id=$CHATID -F document=@$ZIPNAME -F parse_mode=markdown https://api.telegram.org/bot$BOTTOKEN/sendDocument
+    - curl -F chat_id=$CHATID -F document=@$ZIPNAME1 -F parse_mode=markdown https://api.telegram.org/bot$BOTTOKEN/sendDocument
